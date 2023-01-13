@@ -5,16 +5,27 @@
 import asyncio
 import pytest 
 import requests
+import yaml
 
-from helpers import fetch_deps
+from helpers import (
+    fetch_slurmd_deps,
+    fetch_slurmctld_deps,
+)
+
+from pathlib import Path
 
 from pytest_operator.plugin import OpsTest
 from tenacity import retry
 from tenacity.stop import stop_after_attempt
 from tenacity.wait import wait_exponential as wexp
 
-NHC = "lbnl-nhc-1.4.3.tar.gz"
+METADATA = yaml.safe_load(Path("./metadata.yaml").read_text())
+NHC = METADATA["resources"]["nhc"]["filename"]
+ETCD = "etcd-v3.5.0-linux-amd64.tar.gz"
+SERIES = ["focal"]
 SLURMD = "slurmd"
+SLURMDBD = "slurmdbd"
+SLURMCTLD = "slurmctld"
 UNIT_0 = f"{SLURMD}/0"
 
 """
@@ -34,30 +45,66 @@ async def test_build_and_deploy_fail(ops_test: OpsTest):
 """
 
 @pytest.mark.abort_on_fail
+@pytest.mark.parametrize("series", SERIES)
 @pytest.mark.skip_if_deployed
-async def test_build_and_deploy_success(ops_test: OpsTest):
+async def test_build_and_deploy_success(ops_test: OpsTest, series: str):
     """Deploy with nhc resource."""
-    resources = fetch_deps()
+    res_slurmd = fetch_slurmd_deps()
+    res_slurmctld = fetch_slurmctld_deps()
 
+    # Build slurmd local charm
     slurmd_charm = await ops_test.build_charm(".")
-    await ops_test.model.deploy(
-        slurmd_charm,
-        application_name=SLURMD,
-        num_units=1,
-        resources=resources,
-        series="focal",
+
+    await asyncio.gather(
+        # Fetch from charmhub slurmctld
+        ops_test.model.deploy(
+            SLURMCTLD,
+            application_name=SLURMCTLD,
+            num_units=1,
+            resources=res_slurmctld,
+            series=series,
+        ),
+        ops_test.model.deploy(
+            slurmd_charm,
+            application_name=SLURMD,
+            num_units=1,
+            resources=res_slurmd,
+            series=series,
+        ),
+        ops_test.model.deploy(
+            SLURMDBD,
+            application_name=SLURMDBD,
+            num_units=1,
+            series=series,
+        ),
+        ops_test.model.deploy(
+            "percona-cluster",
+            application_name="mysql",
+            num_units=1,
+            series="bionic",
+        ),
     )
-    # Attach the resource to the controller.
+
+    # Attach NHC resource to the slurmd controller
     await ops_test.juju("attach-resource", SLURMD, f"nhc={NHC}")
 
-    # Add slurmctld relation
-    await ops_test.model.add_relation(SLURMD, "slurmctld")
-    
-    # TODO: Fails here due to no slurmctld charm
-    # juju.errors.JujuAPIError: application "slurmctld" not found
+    # Attach ETCD resource to the slurmctld controller
+    await ops_test.juju("attach-resource", SLURMCTLD, f"etcd={ETCD}")
+
+    # Add slurmctld relation to slurmd
+    await ops_test.model.add_relation(SLURMD, SLURMCTLD)
+
+    # Add slurmdbd relation to slurmctld
+    await ops_test.model.add_relation(SLURMCTLD, SLURMDBD)
+
+    # Add slurmdbd relation to slurmctld
+    await ops_test.model.add_relation(SLURMDBD, "mysql")
+
+    # Reducing the update status frequency to speed up the triggering of deferred events.
+    await ops_test.model.set_config({"update-status-hook-interval": "10s"})
 
     # await ops_test.model.set_config({"custom-slurm-repo": "ppa:omnivector/osd-testing"})
     # issuing dummy update_status just to trigger an event
     async with ops_test.fast_forward():
-        await ops_test.model.wait_for_idle(apps=[SLURMD], status="active", timeout=1000)
-        assert ops_test.model.applications[SLURMD].units[0].workload_status == "active"
+        await ops_test.model.wait_for_idle(apps=[SLURMD, SLURMCTLD], status="active", timeout=1000)
+        assert ops_test.model.applications[SLURMD, SLURMCTLD].units[0].workload_status == "active"
