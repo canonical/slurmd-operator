@@ -91,9 +91,6 @@ async def test_build_and_deploy_success(ops_test: OpsTest, series: str):
     # Attach ETCD resource to the slurmctld controller
     await ops_test.juju("attach-resource", SLURMCTLD, f"etcd={ETCD}")
 
-    # Add slurmctld relation to slurmd
-    await ops_test.model.add_relation(SLURMD, SLURMCTLD)
-
     # Add slurmdbd relation to slurmctld
     await ops_test.model.add_relation(SLURMCTLD, SLURMDBD)
 
@@ -103,8 +100,17 @@ async def test_build_and_deploy_success(ops_test: OpsTest, series: str):
     # Reducing the update status frequency to speed up the triggering of deferred events.
     await ops_test.model.set_config({"update-status-hook-interval": "10s"})
 
+    # TODO: It's possible for slurmd to be stuck waiting for slurmctld despite slurmctld and slurmdbd
+    # available. Relation between slurmd and slurmctld has to be added after slurmctld is ready.
+
+    # Wait for slurmdbd and slurmctld to be ready
+    await ops_test.model.wait_for_idle(apps=[SLURMDBD, SLURMCTLD], status="active", timeout=1000)
+
+    # Add slurmctld relation to slurmd
+    await ops_test.model.add_relation(SLURMD, SLURMCTLD)
+
     # await ops_test.model.set_config({"custom-slurm-repo": "ppa:omnivector/osd-testing"})
     # issuing dummy update_status just to trigger an event
     async with ops_test.fast_forward():
-        await ops_test.model.wait_for_idle(apps=[SLURMD, SLURMCTLD], status="active", timeout=1000)
-        assert ops_test.model.applications[SLURMD, SLURMCTLD].units[0].workload_status == "active"
+        await ops_test.model.wait_for_idle(apps=[SLURMD], status="active", timeout=1000)
+        assert ops_test.model.applications[SLURMD].units[0].workload_status == "active"
