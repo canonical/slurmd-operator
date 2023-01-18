@@ -1,6 +1,6 @@
 # Copyright 2023 Canonical Ltd.
 # See LICENSE file for licensing details.
-"""
+
 from pytest import fixture
 from pytest_operator.plugin import OpsTest
 
@@ -9,4 +9,3 @@ from pytest_operator.plugin import OpsTest
 async def slurmd_charm(ops_test: OpsTest):
     charm = await ops_test.build_charm(".")
     return charm
-    """
