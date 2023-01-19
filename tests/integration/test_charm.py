@@ -4,7 +4,6 @@
 
 import asyncio
 import pytest 
-import requests
 import yaml
 
 from helpers import (
@@ -13,11 +12,7 @@ from helpers import (
 )
 
 from pathlib import Path
-
 from pytest_operator.plugin import OpsTest
-from tenacity import retry
-from tenacity.stop import stop_after_attempt
-from tenacity.wait import wait_exponential as wexp
 
 METADATA = yaml.safe_load(Path("./metadata.yaml").read_text())
 NHC = METADATA["resources"]["nhc"]["filename"]
@@ -28,21 +23,6 @@ SLURMDBD = "slurmdbd"
 SLURMCTLD = "slurmctld"
 UNIT_0 = f"{SLURMD}/0"
 
-"""
-@mark.skip_if_deployed
-async def test_build_and_deploy_fail(ops_test: OpsTest):
-    """"""
-    # Deploy fails due to missing nhc resource.
-    slurmd_charm = await ops_test.build_charm(".")
-    await ops_test.model.deploy(slurmd_charm, application_name=SLURMD, resources={"nhc": NHC})
-    # issuing dummy update_status just to trigger an event
-    async with ops_test.fast_forward():
-        # Should block with two messages
-        # slurmd/0 [idle] blocked: Missing nhc resource
-        # slurmd/0 [idle] blocked: Error installing slurmd
-        await ops_test.model.wait_for_idle(apps=[SLURMD], status="blocked", timeout=1000)
-        assert ops_test.model.applications[SLURMD].units[0].workload_status == "blocked"
-"""
 
 @pytest.mark.abort_on_fail
 @pytest.mark.parametrize("series", SERIES)
@@ -59,6 +39,7 @@ async def test_build_and_deploy_success(ops_test: OpsTest, series: str, slurmd_c
         ops_test.model.deploy(
             SLURMCTLD,
             application_name=SLURMCTLD,
+            channel="edge",
             num_units=1,
             resources=res_slurmctld,
             series=series,
@@ -73,12 +54,14 @@ async def test_build_and_deploy_success(ops_test: OpsTest, series: str, slurmd_c
         ops_test.model.deploy(
             SLURMDBD,
             application_name=SLURMDBD,
+            channel="edge",
             num_units=1,
             series=series,
         ),
         ops_test.model.deploy(
             "percona-cluster",
             application_name="mysql",
+            channel="edge",
             num_units=1,
             series="bionic",
         ),
