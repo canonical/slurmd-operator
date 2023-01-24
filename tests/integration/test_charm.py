@@ -100,7 +100,7 @@ async def test_build_and_deploy(ops_test: OpsTest, series: str, slurmd_charm):
     # Add slurmctld integration to slurmd
     await ops_test.model.relate(SLURMD, SLURMCTLD)
 
-    # issuing dummy update_status just to trigger an event
+    # Reduce the update status frequency to accelerate the triggering of deferred events.
     async with ops_test.fast_forward():
         await ops_test.model.wait_for_idle(apps=[SLURMD], status="active", timeout=1000)
         assert ops_test.model.applications[SLURMD].units[0].workload_status == "active"
