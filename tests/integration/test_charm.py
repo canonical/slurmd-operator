@@ -6,14 +6,13 @@ import asyncio
 import pytest
 import requests
 import time
-import yaml
 
 from helpers import (
     fetch_slurmd_deps,
     fetch_slurmctld_deps,
 )
 
-from subprocess import PIPE, check_output
+# from subprocess import PIPE, check_output
 
 from pathlib import Path
 from pytest_operator.plugin import OpsTest
@@ -21,9 +20,6 @@ from tenacity import retry
 from tenacity.stop import stop_after_attempt
 from tenacity.wait import wait_exponential as wexp
 
-METADATA = yaml.safe_load(Path("./metadata.yaml").read_text())
-NHC = METADATA["resources"]["nhc"]["filename"]
-ETCD = "etcd-v3.5.0-linux-amd64.tar.gz"
 SERIES = ["focal"]
 SLURMD = "slurmd"
 SLURMDBD = "slurmdbd"
@@ -39,8 +35,6 @@ async def test_build_and_deploy_success(ops_test: OpsTest, series: str, slurmd_c
     res_slurmd = fetch_slurmd_deps()
     res_slurmctld = fetch_slurmctld_deps()
 
-    charm = await slurmd_charm
-
     await asyncio.gather(
         # Fetch from charmhub slurmctld
         ops_test.model.deploy(
@@ -51,13 +45,13 @@ async def test_build_and_deploy_success(ops_test: OpsTest, series: str, slurmd_c
             resources=res_slurmctld,
             series=series,
         ),
-        ops_test.model.deploy(
-            charm,
-            application_name=SLURMD,
-            num_units=1,
-            resources=res_slurmd,
-            series=series,
-        ),
+        # ops_test.model.deploy(
+        #    charm,
+        #    application_name=SLURMD,
+        #    num_units=1,
+        #    resources=res_slurmd,
+        #    series=series,
+        #),
         ops_test.model.deploy(
             SLURMDBD,
             application_name=SLURMDBD,
@@ -75,21 +69,32 @@ async def test_build_and_deploy_success(ops_test: OpsTest, series: str, slurmd_c
     )
 
     # Attach ETCD resource to the slurmctld controller
-    await ops_test.juju("attach-resource", SLURMCTLD, f"etcd={ETCD}")
+    await ops_test.juju("attach-resource", SLURMCTLD, f"etcd={res_slurmctld['etcd']}")
 
-    # Add slurmdbd relation to slurmctld
+    # Add slurmdbd integration to slurmctld
     await ops_test.model.relate(SLURMCTLD, SLURMDBD)
 
-    # Add mysql relation to slurmdbd
+    # Add mysql integration to slurmdbd
     await ops_test.model.relate(SLURMDBD, "mysql")
 
     # TODO: It's possible for slurmd to be stuck waiting for slurmctld despite slurmctld and slurmdbd
     # available. Relation between slurmd and slurmctld has to be added after slurmctld is ready.
+    await ops_test.model.wait_for_idle(apps=[SLURMCTLD], status="blocked", timeout=1000)
+
+    # Build and Deploy Slurmd
+    charm = await slurmd_charm
+    await ops_test.model.deploy(
+            charm,
+            application_name=SLURMD,
+            num_units=1,
+            resources=res_slurmd,
+            series=series,
+    )
 
     # Attach NHC resource to the slurmd controller
-    await ops_test.juju("attach-resource", SLURMD, f"nhc={NHC}")
+    await ops_test.juju("attach-resource", SLURMD, f"nhc={res_slurmd['nhc']}")
 
-    # Add slurmctld relation to slurmd
+    # Add slurmctld integration to slurmd
     await ops_test.model.relate(SLURMD, SLURMCTLD)
 
     # issuing dummy update_status just to trigger an event
@@ -101,15 +106,10 @@ async def test_build_and_deploy_success(ops_test: OpsTest, series: str, slurmd_c
 async def test_mpi_install(ops_test: OpsTest):
     unit = ops_test.model.applications[SLURMD].units[0]
     action = await unit.run_action("mpi-install")
-    result = await action.wait()
-    result = check_output(
-        f"JUJU_MODEL={ops_test.model_full_name} juju exec --unit slurmd/0 mpirun --version",
-        stderr=PIPE,
-        shell=True,
-        universal_newlines=True,
-    )
-    time.sleep(5)  # Wait 
-    assert "buckets" in result
+    action_res = await action.wait()
+    assert action_res['installation'] == 'Successfull.'
+    cmd_res = await unit.ssh(command="mpirun --version")
+    assert "Version:" in cmd_res
 
 """
 @pytest.mark.abort_on_fail
