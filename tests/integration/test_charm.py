@@ -19,8 +19,8 @@ import asyncio
 import pytest
 
 from helpers import (
-    fetch_slurmd_deps,
-    fetch_slurmctld_deps,
+    get_slurmd_res,
+    get_slurmctld_res,
 )
 
 from pathlib import Path
@@ -33,7 +33,6 @@ SERIES = ["focal"]
 SLURMD = "slurmd"
 SLURMDBD = "slurmdbd"
 SLURMCTLD = "slurmctld"
-UNIT_0 = f"{SLURMD}/0"
 
 
 @pytest.mark.abort_on_fail
@@ -41,8 +40,8 @@ UNIT_0 = f"{SLURMD}/0"
 @pytest.mark.skip_if_deployed
 async def test_build_and_deploy(ops_test: OpsTest, series: str, slurmd_charm):
     """Test that the slurmd charm can stabilize against slurmctld, slurmdbd and percona."""
-    res_slurmd = fetch_slurmd_deps()
-    res_slurmctld = fetch_slurmctld_deps()
+    res_slurmd = get_slurmd_res()
+    res_slurmctld = get_slurmctld_res()
 
     # Fetch edge from charmhub for slurmctld, slurmdbd and percona and deploy
     await asyncio.gather(
@@ -79,7 +78,7 @@ async def test_build_and_deploy(ops_test: OpsTest, series: str, slurmd_charm):
     # Add mysql integration to slurmdbd
     await ops_test.model.relate(SLURMDBD, "mysql")
 
-    # TODO: It's possible for slurmd to be stuck waiting for slurmctld despite slurmctld and slurmdbd
+    # IMPORTANT: It's possible for slurmd to be stuck waiting for slurmctld despite slurmctld and slurmdbd
     # available. Relation between slurmd and slurmctld has to be added after slurmctld is ready
     # otherwise risk running into race-condition type behavior.
     await ops_test.model.wait_for_idle(apps=[SLURMCTLD], status="blocked", timeout=1000)
@@ -105,6 +104,7 @@ async def test_build_and_deploy(ops_test: OpsTest, series: str, slurmd_charm):
         await ops_test.model.wait_for_idle(apps=[SLURMD], status="active", timeout=1000)
         assert ops_test.model.applications[SLURMD].units[0].workload_status == "active"
 
+
 async def test_mpi_install(ops_test: OpsTest):
     "That that mpi is installed."
     unit = ops_test.model.applications[SLURMD].units[0]
@@ -114,11 +114,13 @@ async def test_mpi_install(ops_test: OpsTest):
     cmd_res = (await unit.ssh(command="mpirun --version")).strip("\n")
     assert "Version:" in cmd_res
 
+
 async def test_slurmd_is_active(ops_test: OpsTest):
     """Test that slurmd is active."""
     unit = ops_test.model.applications[SLURMD].units[0]
     cmd_res = (await unit.ssh(command="systemctl is-active slurmd")).strip("\n")
     assert cmd_res == "active"
+
 
 async def test_munge_is_active(ops_test: OpsTest):
     """Test that munge is active."""

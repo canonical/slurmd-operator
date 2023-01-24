@@ -18,7 +18,6 @@ import logging
 import pathlib
 import shlex
 import subprocess
-import yaml
 
 from typing import Dict
 from urllib import request
@@ -27,8 +26,7 @@ logger = logging.getLogger(__name__)
 
 ETCD = "etcd-v3.5.0-linux-amd64.tar.gz"
 ETCD_URL = f"https://github.com/etcd-io/etcd/releases/download/v3.5.0/{ETCD}"
-METADATA = yaml.safe_load(pathlib.Path("./metadata.yaml").read_text())
-NHC = METADATA["resources"]["nhc"]["filename"]
+NHC = "lbnl-nhc-1.4.3.tar.gz"
 NHC_URL = f"https://github.com/mej/nhc/releases/download/1.4.3/{NHC}"
 VERSION = "version"
 VERSION_NUM = subprocess.run(
