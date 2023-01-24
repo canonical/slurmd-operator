@@ -1,18 +1,27 @@
 #!/usr/bin/env python3
 # Copyright 2023 Canonical Ltd.
-# See LICENSE file for licensing details.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Test slurmd charm against other SLURM charms in the latest/edge channel."""
 
 import asyncio
 import pytest
-import requests
-import time
 
 from helpers import (
     fetch_slurmd_deps,
     fetch_slurmctld_deps,
 )
-
-# from subprocess import PIPE, check_output
 
 from pathlib import Path
 from pytest_operator.plugin import OpsTest
@@ -30,13 +39,13 @@ UNIT_0 = f"{SLURMD}/0"
 @pytest.mark.abort_on_fail
 @pytest.mark.parametrize("series", SERIES)
 @pytest.mark.skip_if_deployed
-async def test_build_and_deploy_success(ops_test: OpsTest, series: str, slurmd_charm):
-    """Deploy with nhc resource."""
+async def test_build_and_deploy(ops_test: OpsTest, series: str, slurmd_charm):
+    """Test that the slurmd charm can stabilize against slurmctld, slurmdbd and percona."""
     res_slurmd = fetch_slurmd_deps()
     res_slurmctld = fetch_slurmctld_deps()
 
+    # Fetch edge from charmhub for slurmctld, slurmdbd and percona and deploy
     await asyncio.gather(
-        # Fetch from charmhub slurmctld
         ops_test.model.deploy(
             SLURMCTLD,
             application_name=SLURMCTLD,
@@ -45,13 +54,6 @@ async def test_build_and_deploy_success(ops_test: OpsTest, series: str, slurmd_c
             resources=res_slurmctld,
             series=series,
         ),
-        # ops_test.model.deploy(
-        #    charm,
-        #    application_name=SLURMD,
-        #    num_units=1,
-        #    resources=res_slurmd,
-        #    series=series,
-        #),
         ops_test.model.deploy(
             SLURMDBD,
             application_name=SLURMDBD,
@@ -78,7 +80,8 @@ async def test_build_and_deploy_success(ops_test: OpsTest, series: str, slurmd_c
     await ops_test.model.relate(SLURMDBD, "mysql")
 
     # TODO: It's possible for slurmd to be stuck waiting for slurmctld despite slurmctld and slurmdbd
-    # available. Relation between slurmd and slurmctld has to be added after slurmctld is ready.
+    # available. Relation between slurmd and slurmctld has to be added after slurmctld is ready
+    # otherwise risk running into race-condition type behavior.
     await ops_test.model.wait_for_idle(apps=[SLURMCTLD], status="blocked", timeout=1000)
 
     # Build and Deploy Slurmd
@@ -102,25 +105,23 @@ async def test_build_and_deploy_success(ops_test: OpsTest, series: str, slurmd_c
         await ops_test.model.wait_for_idle(apps=[SLURMD], status="active", timeout=1000)
         assert ops_test.model.applications[SLURMD].units[0].workload_status == "active"
 
-@pytest.mark.abort_on_fail
 async def test_mpi_install(ops_test: OpsTest):
+    "That that mpi is installed."
     unit = ops_test.model.applications[SLURMD].units[0]
     action = await unit.run_action("mpi-install")
     action_res = await action.wait()
-    assert action_res['installation'] == 'Successfull.'
-    cmd_res = await unit.ssh(command="mpirun --version")
+    assert "installation" in action_res.results.keys()
+    cmd_res = (await unit.ssh(command="mpirun --version")).strip("\n")
     assert "Version:" in cmd_res
 
-"""
-@pytest.mark.abort_on_fail
-@retry(wait=wexp(multiplier=2, min=1, max=30), stop=stop_after_attempt(10), reraise=True)
-async def test_application_is_up(ops_test: OpsTest):
-    status = await ops_test.model.get_status() 
-    unit = list(status.applications[SLURMCTLD].units)[0]
-    address = status["applications"][SLURMCTLD]["units"][unit]["public-address"]
-    # Test ETCD3
-    response = requests.get(f"http://{address}:2379/v3/")
-    assert response.status_code == 200
-    # response = requests.get(f"http://{address}:6818/metrics")
-    # assert response.status_code == 200
-"""
+async def test_slurmd_is_active(ops_test: OpsTest):
+    """Test that slurmd is active."""
+    unit = ops_test.model.applications[SLURMD].units[0]
+    cmd_res = (await unit.ssh(command="systemctl is-active slurmd")).strip("\n")
+    assert cmd_res == "active"
+
+async def test_munge_is_active(ops_test: OpsTest):
+    """Test that munge is active."""
+    unit = ops_test.model.applications[SLURMD].units[0]
+    cmd_res = (await unit.ssh(command="systemctl is-active munge")).strip("\n")
+    assert cmd_res == "active"

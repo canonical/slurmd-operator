@@ -1,43 +1,56 @@
+#!/usr/bin/env python3
 # Copyright 2023 Canonical Ltd.
-# See LICENSE file for licensing details.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+"""Helpers for the slurmd integration tests."""
 
-import urllib.request
+import logging
+import pathlib
+import shlex
+import subprocess
 import yaml
 
-from pathlib import Path
+from typing import Dict
+from urllib import request
 
-METADATA = yaml.safe_load(Path("./metadata.yaml").read_text())
-ETCD_URL = "https://github.com/etcd-io/etcd/releases/download/v3.5.0/etcd-v3.5.0-linux-amd64.tar.gz"
-ETCD_PATH = "etcd-v3.5.0-linux-amd64.tar.gz"
-NHC_URL = "https://github.com/mej/nhc/releases/download/1.4.3/lbnl-nhc-1.4.3.tar.gz"
-NHC_PATH = METADATA["resources"]["nhc"]["filename"]
-VERSION = "0.8.5"
-VERSION_PATH = "version"
+logger = logging.getLogger(__name__)
+
+ETCD = "etcd-v3.5.0-linux-amd64.tar.gz"
+ETCD_URL = f"https://github.com/etcd-io/etcd/releases/download/v3.5.0/{ETCD}"
+METADATA = yaml.safe_load(pathlib.Path("./metadata.yaml").read_text())
+NHC = METADATA["resources"]["nhc"]["filename"]
+NHC_URL = f"https://github.com/mej/nhc/releases/download/1.4.3/{NHC}"
+VERSION = "version"
+VERSION_NUM = subprocess.run(
+    shlex.split("git describe --always"), stdout=subprocess.PIPE, text=True
+).stdout.strip("\n")
 
 
-def fetch_slurmd_deps() -> dict:
-    """Slurmd depends on NHC tarball and version file."""
-    nhc = Path(NHC_PATH)
-    version = Path(VERSION_PATH)
-    if nhc.exists():
-        pass
-    else:
-        # fetch NHC resource
-        urllib.request.urlretrieve(NHC_URL, NHC_PATH)
-    if version.exists():
-        pass
-    else:
-        # create version file
-        with open(VERSION_PATH, "w") as f:
-            f.write(VERSION)
-    return {"nhc": nhc}
+def get_slurmctld_res() -> Dict[str, pathlib.Path]:
+    """Get slurmctld resources needed for charm deployment."""
+    if not (version := pathlib.Path(VERSION)).exists():
+        logger.info(f"Setting resource {VERSION} to value {VERSION_NUM}...")
+        version.write_text(VERSION_NUM)
+    if not (etcd := pathlib.Path(ETCD)).exists():
+        logger.info(f"Getting resource {ETCD} from {ETCD_URL}...")
+        request.urlretrieve(ETCD_URL, etcd)
 
-def fetch_slurmctld_deps() -> dict:
-    """Slurmctld depends on etcd """
-    etcd = Path(ETCD_PATH)
-    if etcd.exists():
-        pass
-    else:
-        # fetch ETCD resource
-        urllib.request.urlretrieve(ETCD_URL, ETCD_PATH)
     return {"etcd": etcd}
+
+def get_slurmd_res() -> Dict[str, pathlib.Path]:
+    """Get slurmd resources needed for charm deployment."""
+    if not (nhc := pathlib.Path(NHC)).exists():
+        logger.info(f"Getting resource {NHC} from {NHC_URL}...")
+        request.urlretrieve(NHC_URL, nhc)
+
+    return {"nhc": nhc}
