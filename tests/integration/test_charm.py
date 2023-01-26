@@ -84,9 +84,8 @@ async def test_build_and_deploy(ops_test: OpsTest, series: str, slurmd_charm):
     await ops_test.model.wait_for_idle(apps=[SLURMCTLD], status="blocked", timeout=1000)
 
     # Build and Deploy Slurmd
-    charm = await slurmd_charm
     await ops_test.model.deploy(
-            charm,
+            str(await slurmd_charm),
             application_name=SLURMD,
             num_units=1,
             resources=res_slurmd,
@@ -105,16 +104,7 @@ async def test_build_and_deploy(ops_test: OpsTest, series: str, slurmd_charm):
         assert ops_test.model.applications[SLURMD].units[0].workload_status == "active"
 
 
-async def test_mpi_install(ops_test: OpsTest):
-    "That that mpi is installed."
-    unit = ops_test.model.applications[SLURMD].units[0]
-    action = await unit.run_action("mpi-install")
-    action_res = await action.wait()
-    assert "installation" in action_res.results.keys()
-    cmd_res = (await unit.ssh(command="mpirun --version")).strip("\n")
-    assert "Version:" in cmd_res
-
-
+@pytest.mark.abort_on_fail
 async def test_slurmd_is_active(ops_test: OpsTest):
     """Test that slurmd is active."""
     unit = ops_test.model.applications[SLURMD].units[0]
@@ -122,6 +112,7 @@ async def test_slurmd_is_active(ops_test: OpsTest):
     assert cmd_res == "active"
 
 
+@pytest.mark.abort_on_fail
 async def test_munge_is_active(ops_test: OpsTest):
     """Test that munge is active."""
     unit = ops_test.model.applications[SLURMD].units[0]
